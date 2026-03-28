@@ -130,26 +130,6 @@ load "helpers"
 }
 
 # ===========================================================================
-# subcommands/exists
-# ===========================================================================
-
-@test "exists: returns exit 0 when service exists" {
-  create_service_fixture "testsvc"
-  run bash "$PLUGIN_DIR/subcommands/exists" "testsvc"
-  [ "$status" -eq 0 ]
-}
-
-@test "exists: returns exit 1 when service does not exist" {
-  run bash "$PLUGIN_DIR/subcommands/exists" "nosuchservice"
-  [ "$status" -eq 1 ]
-}
-
-@test "exists: returns non-zero for empty service name" {
-  run bash "$PLUGIN_DIR/subcommands/exists" ""
-  [ "$status" -ne 0 ]
-}
-
-# ===========================================================================
 # subcommands/list
 # ===========================================================================
 
@@ -407,41 +387,31 @@ load "helpers"
   [ "$status" -ne 0 ]
 }
 
-# ===========================================================================
-# subcommands/namespace — input validation (no real docker needed)
-# ===========================================================================
+@test "expose: UI port maps to UI_HOST_BIND, not server PORT_MAP" {
+  create_service_fixture "exposesvc"
+  echo "true" > "$PLUGIN_BASE_PATH/exposesvc/UI_ENABLED"
+  chmod 640 "$PLUGIN_BASE_PATH/exposesvc/UI_ENABLED"
 
-@test "namespace create: rejects namespace name with spaces" {
-  create_service_fixture "nssvc"
-  # The container check will fail (mock docker inspect exits 1) before
-  # we even reach name validation, so we test validation separately.
-  run bash -c "
-    source '$PLUGIN_DIR/config'
-    source '$PLUGIN_DIR/common-functions'
-    NS_NAME='bad name'
-    if ! echo \"\$NS_NAME\" | grep -qE '^[a-zA-Z0-9_-]+\$'; then
-      echo 'Invalid namespace name' >&2
-      exit 1
-    fi
-    echo 'ok'
-  "
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"Invalid namespace"* ]]
+  run bash "$PLUGIN_DIR/subcommands/expose" "exposesvc"
+  [ "$status" -eq 0 ]
+
+  local port_map
+  port_map="$(cat "$PLUGIN_BASE_PATH/exposesvc/PORT_MAP")"
+  [[ "$port_map" == "127.0.0.1:7233:7233" ]]
+  [[ "$port_map" != *"8233"* ]]
+
+  [ -f "$PLUGIN_BASE_PATH/exposesvc/UI_HOST_BIND" ]
+  [[ "$(cat "$PLUGIN_BASE_PATH/exposesvc/UI_HOST_BIND")" == "127.0.0.1" ]]
 }
 
-@test "namespace create: accepts valid namespace name" {
-  run bash -c "
-    source '$PLUGIN_DIR/config'
-    source '$PLUGIN_DIR/common-functions'
-    NS_NAME='my-namespace_1'
-    if ! echo \"\$NS_NAME\" | grep -qE '^[a-zA-Z0-9_-]+\$'; then
-      echo 'Invalid namespace name' >&2
-      exit 1
-    fi
-    echo 'ok'
-  "
+@test "expose: explicit 7233 only drops UI_HOST_BIND when UI enabled" {
+  create_service_fixture "exposesvc"
+  echo "true" > "$PLUGIN_BASE_PATH/exposesvc/UI_ENABLED"
+  chmod 640 "$PLUGIN_BASE_PATH/exposesvc/UI_ENABLED"
+
+  run bash "$PLUGIN_DIR/subcommands/expose" "exposesvc" "7233"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"ok"* ]]
+  [ ! -f "$PLUGIN_BASE_PATH/exposesvc/UI_HOST_BIND" ]
 }
 
 # ===========================================================================
@@ -556,18 +526,4 @@ load "helpers"
   run bash "$PLUGIN_DIR/subcommands/unlink" "unlinksvc" "notlinkedapp" --no-restart
   [ "$status" -ne 0 ]
   [[ "$output" == *"not linked"* ]]
-}
-
-@test "linked: returns exit 0 when app is linked" {
-  init_mock_state
-  create_service_fixture "linkedsvc"
-  bash "$PLUGIN_DIR/subcommands/link" "linkedsvc" "myapp" --no-restart
-  run bash "$PLUGIN_DIR/subcommands/linked" "linkedsvc" "myapp"
-  [ "$status" -eq 0 ]
-}
-
-@test "linked: returns exit 1 when app is not linked" {
-  create_service_fixture "linkedsvc"
-  run bash "$PLUGIN_DIR/subcommands/linked" "linkedsvc" "notlinkedapp"
-  [ "$status" -ne 0 ]
 }

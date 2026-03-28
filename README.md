@@ -137,7 +137,6 @@ dokku temporal:set main POSTGRES_DB_VISIBILITY temporal_visibility
 | `temporal:restart <service>` | 重启服务 |
 | `temporal:info <service> [--show-password]` | 显示服务信息 |
 | `temporal:list` | 列出所有服务 |
-| `temporal:exists <service>` | 检查服务是否存在（退出码 0/1） |
 
 ### 配置管理
 
@@ -175,16 +174,9 @@ dokku temporal:link <service> <app> [--alias <prefix>] [--namespace <ns>]
 
 # 取消链接
 dokku temporal:unlink <service> <app>
-
-# 检查链接状态
-dokku temporal:linked <service> <app>
-
-# 列出链接的应用
-dokku temporal:links <service>
-
-# 列出应用链接的 Temporal 服务
-dokku temporal:app-links <app>
 ```
+
+链接关系记录在服务的 `LINKS` 文件中（`dokku temporal:info` 会显示摘要）。也可用 `dokku config:show <app> | grep TEMPORAL` 确认环境变量。
 
 ### 端口暴露
 
@@ -199,25 +191,7 @@ dokku temporal:expose <service> --public [port]
 dokku temporal:unexpose <service>
 ```
 
-### 命名空间管理
-
-```bash
-# 创建命名空间
-dokku temporal:namespace <service> create <namespace>
-
-# 列出命名空间
-dokku temporal:namespace <service> list
-```
-
-### 日志与调试
-
-```bash
-# 查看日志
-dokku temporal:logs <service> [--tail <n>] [--follow]
-
-# 进入 tctl 交互 shell
-dokku temporal:connect <service>
-```
+命名空间、日志与 `tctl`：请在服务器上使用 Docker 直接操作容器，例如 `docker logs dokku.temporal.<service>`、`docker exec -it dokku.temporal.<service> tctl ...`。
 
 ### 版本升级
 
@@ -293,7 +267,7 @@ Temporal did not become ready within 60s
 
 ```bash
 # 1. 查看容器日志
-dokku temporal:logs main --tail 50
+docker logs --tail 50 dokku.temporal.main
 
 # 2. 检查 PostgreSQL 连接
 dokku temporal:info main
@@ -321,10 +295,6 @@ docker inspect dokku.temporal.main | grep -A5 '"State"'
 ### 应用无法连接 Temporal
 
 ```bash
-# 确认链接状态
-dokku temporal:linked main your-app
-dokku temporal:links main
-
 # 确认环境变量注入
 dokku config:show your-app | grep TEMPORAL
 

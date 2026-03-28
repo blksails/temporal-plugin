@@ -25,7 +25,7 @@ BlackSail project applications require Temporal for durable workflow execution (
 2. **App Linking** -- Link/unlink Temporal to Dokku apps via `dokku temporal:link <service> <app>`, automatically injecting `TEMPORAL_ADDRESS` and `TEMPORAL_NAMESPACE` environment variables.
 3. **Persistent Storage** -- Temporal state persists across container restarts using a linked PostgreSQL database (via the existing dokku-postgres plugin).
 4. **Web UI Access** -- Expose the Temporal Web UI for workflow monitoring and debugging.
-5. **Multi-Namespace Support** -- Support creating and managing multiple Temporal namespaces for different apps or environments.
+5. **Namespaces** -- Ensure `default` on start; additional namespaces are managed with `tctl` inside the container.
 6. **Configuration Management** -- Allow customization of Temporal dynamic config, gRPC ports, and other settings per service instance.
 
 ## Non-Goals
@@ -52,13 +52,8 @@ temporal:info <service>            Display service info
 temporal:start <service>           Start the service
 temporal:stop <service>            Stop the service
 temporal:restart <service>         Restart the service
-temporal:logs <service>            Display service logs
 temporal:expose <service> [ports]  Expose ports on the host
 temporal:unexpose <service>        Unexpose ports
-temporal:exists <service>          Check if service exists
-temporal:linked <service> <app>    Check if service is linked to app
-temporal:links <service>           List apps linked to service
 temporal:list                      List all Temporal services
 temporal:set <service> <key> <val> Set a service property
-temporal:namespace <service> <ns>  Create/register a namespace
 ```

@@ -73,24 +73,51 @@ for PORT in "${PORTS[@]}"; do
   fi
 done
 
-# Write PORT_MAP file: format "bind_addr:host_port:container_port" per line
+# Web UI runs in a separate container (host UI_PORT -> container 8080). Do not map
+# UI_PORT on the Temporal server container — only record bind address in UI_HOST_BIND.
+UI_ENABLED="$(cat "$SERVICE_ROOT/UI_ENABLED" 2>/dev/null || echo "false")"
+UI_PORT_VAL="$(cat "$SERVICE_ROOT/UI_PORT" 2>/dev/null || echo "8233")"
+MAIN_PORTS=()
+PUBLISH_UI=false
+for PORT in "${PORTS[@]}"; do
+  if [[ "$UI_ENABLED" == "true" ]] && [[ "$PORT" == "$UI_PORT_VAL" ]]; then
+    PUBLISH_UI=true
+    continue
+  fi
+  MAIN_PORTS+=("$PORT")
+done
+
+if [[ ${#MAIN_PORTS[@]} -eq 0 ]]; then
+  dokku_log_fail "At least the gRPC port (7233) must be listed. Web UI (${UI_PORT_VAL}) is a separate container — use: dokku ${PLUGIN_COMMAND_PREFIX}:expose $SERVICE 7233 ${UI_PORT_VAL}"
+fi
+
+# Write PORT_MAP file: format "bind_addr:host_port:container_port" per line (server only)
 PORT_MAP_FILE="$SERVICE_ROOT/PORT_MAP"
 > "$PORT_MAP_FILE"
 
-for PORT in "${PORTS[@]}"; do
-  # For gRPC port, map to container port 7233
+for PORT in "${MAIN_PORTS[@]}"; do
   if [[ "$PORT" == "7233" ]]; then
     echo "${BIND_ADDR}:7233:7233" >> "$PORT_MAP_FILE"
   else
-    # For other ports (e.g. UI), map host_port:container_port with the same number
     echo "${BIND_ADDR}:${PORT}:${PORT}" >> "$PORT_MAP_FILE"
   fi
 done
 
 chmod 600 "$PORT_MAP_FILE"
 
+UI_HOST_BIND_FILE="$SERVICE_ROOT/UI_HOST_BIND"
+if [[ "$UI_ENABLED" == "true" ]] && [[ "$PUBLISH_UI" == "true" ]]; then
+  echo "$BIND_ADDR" > "$UI_HOST_BIND_FILE"
+  chmod 600 "$UI_HOST_BIND_FILE"
+else
+  rm -f "$UI_HOST_BIND_FILE"
+fi
+
 dokku_log_info1 "Expose configuration saved for ${PLUGIN_SERVICE} service $SERVICE"
-for PORT in "${PORTS[@]}"; do
-  dokku_log_info2 "${BIND_ADDR}:${PORT}"
+for PORT in "${MAIN_PORTS[@]}"; do
+  dokku_log_info2 "${BIND_ADDR}:${PORT} (gRPC server)"
 done
+if [[ "$PUBLISH_UI" == "true" ]]; then
+  dokku_log_info2 "${BIND_ADDR}:${UI_PORT_VAL} (Web UI -> container 8080)"
+fi
 dokku_log_warn "Restart the service for changes to take effect: dokku ${PLUGIN_COMMAND_PREFIX}:restart $SERVICE"

@@ -38,17 +38,10 @@ dokku-temporal/
 │   ├── start                     # temporal:start <service>
 │   ├── stop                      # temporal:stop <service>
 │   ├── restart                   # temporal:restart <service>
-│   ├── logs                      # temporal:logs <service>
 │   ├── expose                    # temporal:expose <service> [ports]
 │   ├── unexpose                  # temporal:unexpose <service>
-│   ├── exists                    # temporal:exists <service>
-│   ├── linked                    # temporal:linked <service> <app>
-│   ├── links                     # temporal:links <service>
 │   ├── list                      # temporal:list
-│   ├── set                       # temporal:set <service> <key> <value>
-│   ├── connect                   # temporal:connect <service> (open tctl shell)
-│   ├── namespace                 # temporal:namespace <service> <namespace>
-│   └── app-links                 # temporal:app-links <app>
+│   └── set                       # temporal:set <service> <key> <value>
 ├── dynamicconfig/                # Default Temporal dynamic config templates
 │   └── dynamic_config.yaml       # Default dynamic configuration
 ├── templates/                    # Configuration templates

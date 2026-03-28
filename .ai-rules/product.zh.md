@@ -25,7 +25,7 @@ BlackSail 项目的应用需要 Temporal 来执行持久化工作流（如后台
 2. **应用链接** -- 通过 `dokku temporal:link <service> <app>` 将 Temporal 链接到 Dokku 应用，自动注入 `TEMPORAL_ADDRESS` 和 `TEMPORAL_NAMESPACE` 环境变量。
 3. **持久化存储** -- Temporal 状态通过远程 Supabase PostgreSQL 数据库实现跨容器重启的持久化。
 4. **Web UI 访问** -- 暴露 Temporal Web UI 用于工作流监控和调试。
-5. **多命名空间支持** -- 支持为不同应用或环境创建和管理多个 Temporal 命名空间。
+5. **命名空间** -- 启动时确保 `default` 命名空间；额外命名空间在容器内用 `tctl` 管理。
 6. **配置管理** -- 允许自定义 Temporal 动态配置、gRPC 端口和每个服务实例的其他设置。
 
 ## 非目标
@@ -52,15 +52,10 @@ temporal:info <service>            显示服务信息
 temporal:start <service>           启动服务
 temporal:stop <service>            停止服务
 temporal:restart <service>         重启服务
-temporal:logs <service>            显示服务日志
 temporal:expose <service> [ports]  暴露端口到宿主机
 temporal:unexpose <service>        取消暴露端口
-temporal:exists <service>          检查服务是否存在
-temporal:linked <service> <app>    检查服务是否链接到应用
-temporal:links <service>           列出链接到服务的应用
 temporal:list                      列出所有 Temporal 服务
 temporal:set <service> <key> <val> 设置服务属性
-temporal:namespace <service> <ns>  创建/注册命名空间
 ```
 
 ## 典型使用流程
@@ -81,7 +76,4 @@ dokku temporal:start main
 
 # 4. 链接到应用（自动注入环境变量并重启应用）
 dokku temporal:link main my-worker-app
-
-# 5. 可选：创建额外命名空间
-dokku temporal:namespace main create my-namespace
 ```

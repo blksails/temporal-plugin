@@ -38,17 +38,10 @@ dokku-temporal/
 │   ├── start                     # temporal:start <service>       启动服务
 │   ├── stop                      # temporal:stop <service>        停止服务
 │   ├── restart                   # temporal:restart <service>     重启服务
-│   ├── logs                      # temporal:logs <service>        查看日志
 │   ├── expose                    # temporal:expose <service>      暴露端口
 │   ├── unexpose                  # temporal:unexpose <service>    取消暴露
-│   ├── exists                    # temporal:exists <service>      检查存在
-│   ├── linked                    # temporal:linked <service> <app>检查链接
-│   ├── links                     # temporal:links <service>       列出链接
 │   ├── list                      # temporal:list                  列出全部
-│   ├── set                       # temporal:set <service> <k> <v> 设置属性
-│   ├── connect                   # temporal:connect <service>     打开 tctl
-│   ├── namespace                 # temporal:namespace <svc> <ns>  管理命名空间
-│   └── app-links                 # temporal:app-links <app>       应用链接
+│   └── set                       # temporal:set <service> <k> <v> 设置属性
 ├── dynamicconfig/                # 默认 Temporal 动态配置模板
 │   └── dynamic_config.yaml       # 默认动态配置
 ├── templates/                    # 配置模板

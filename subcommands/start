@@ -71,6 +71,7 @@ DOCKER_ARGS=(
   -e "VISIBILITY_DBNAME=${PG_DB_VISIBILITY}"
   -e "DYNAMIC_CONFIG_FILE_PATH=/etc/temporal/config/dynamicconfig/dynamic_config.yaml"
   -e "DEFAULT_NAMESPACE=default"
+  -e "BIND_ON_IP=0.0.0.0"
   -v "${SERVICE_ROOT}/dynamicconfig:/etc/temporal/config/dynamicconfig:ro"
 )
 
@@ -163,12 +164,13 @@ if [[ "$UI_ENABLED" == "true" ]]; then
     $DOCKER_BIN rm "$UI_CONTAINER_NAME" 2>/dev/null || true
   fi
 
-  dokku_log_info2 "Starting UI container on 127.0.0.1:${UI_PORT}..."
+  UI_HOST_BIND="$(cat "$SERVICE_ROOT/UI_HOST_BIND" 2>/dev/null || echo "127.0.0.1")"
+  dokku_log_info2 "Starting UI container on ${UI_HOST_BIND}:${UI_PORT}..."
   UI_DOCKER_ARGS=(
     "$DOCKER_BIN" run -d
     --name "$UI_CONTAINER_NAME"
     --restart "on-failure:5"
-    -p "127.0.0.1:${UI_PORT}:8080"
+    -p "${UI_HOST_BIND}:${UI_PORT}:8080"
     -e "TEMPORAL_ADDRESS=${CONTAINER_NAME}:7233"
   )
   if [[ -n "$NETWORK_ARGS" ]]; then

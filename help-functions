@@ -13,18 +13,11 @@ help_content() {
     ${PLUGIN_COMMAND_PREFIX}:restart <service>                   Restart a ${PLUGIN_SERVICE} service
     ${PLUGIN_COMMAND_PREFIX}:info <service> [--show-password]    Show info about a ${PLUGIN_SERVICE} service
     ${PLUGIN_COMMAND_PREFIX}:list                                List all ${PLUGIN_SERVICE} services
-    ${PLUGIN_COMMAND_PREFIX}:exists <service>                    Check if a ${PLUGIN_SERVICE} service exists
     ${PLUGIN_COMMAND_PREFIX}:set <service> <key> [<value>]       Set or unset a ${PLUGIN_SERVICE} service property
     ${PLUGIN_COMMAND_PREFIX}:link <service> <app>                Link a ${PLUGIN_SERVICE} service to an app
     ${PLUGIN_COMMAND_PREFIX}:unlink <service> <app>              Unlink a ${PLUGIN_SERVICE} service from an app
-    ${PLUGIN_COMMAND_PREFIX}:linked <service> <app>              Check if a ${PLUGIN_SERVICE} service is linked to an app
-    ${PLUGIN_COMMAND_PREFIX}:links <service>                     List all apps linked to a ${PLUGIN_SERVICE} service
-    ${PLUGIN_COMMAND_PREFIX}:app-links <app>                     List all ${PLUGIN_SERVICE} services linked to an app
     ${PLUGIN_COMMAND_PREFIX}:expose <service> [port...]          Expose a ${PLUGIN_SERVICE} service on the host
     ${PLUGIN_COMMAND_PREFIX}:unexpose <service>                  Unexpose a ${PLUGIN_SERVICE} service
-    ${PLUGIN_COMMAND_PREFIX}:logs <service> [-t] [--num NUM]     Display recent log output for a ${PLUGIN_SERVICE} service
-    ${PLUGIN_COMMAND_PREFIX}:connect <service>                   Open a tctl shell for a ${PLUGIN_SERVICE} service
-    ${PLUGIN_COMMAND_PREFIX}:namespace <service> <cmd> [args]    Manage namespaces for a ${PLUGIN_SERVICE} service
 help_desc
 }
 

@@ -82,8 +82,9 @@ fi
 
 # UI status
 UI_ENABLED="$(cat "$SERVICE_ROOT/UI_ENABLED" 2>/dev/null || echo "false")"
+UI_HOST_BIND="$(cat "$SERVICE_ROOT/UI_HOST_BIND" 2>/dev/null || echo "127.0.0.1")"
 if [[ "$UI_ENABLED" == "true" ]] && is_container_running "$UI_CONTAINER_NAME"; then
-  UI_STATUS="running (127.0.0.1:${UI_PORT})"
+  UI_STATUS="running (${UI_HOST_BIND}:${UI_PORT})"
 elif [[ "$UI_ENABLED" == "true" ]]; then
   UI_STATUS="enabled (stopped)"
 else
