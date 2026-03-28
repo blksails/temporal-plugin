@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../config"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../common-functions"
+
+SERVICE="$1"
+shift
+
+require_service "$SERVICE"
+
+CONTAINER_NAME="$(service_container_name "$SERVICE")"
+
+# Parse flags
+TAIL_LINES=100
+FOLLOW=false
+SHOW_UI=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -t|--tail)
+      if [[ -n "${2:-}" ]] && echo "$2" | grep -qE '^[0-9]+$'; then
+        TAIL_LINES="$2"
+        shift 2
+      else
+        dokku_log_fail "--tail requires a numeric argument"
+      fi
+      ;;
+    -f|--follow)
+      FOLLOW=true
+      shift
+      ;;
+    --ui)
+      SHOW_UI=true
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+# Select container to show logs for
+if [[ "$SHOW_UI" == "true" ]]; then
+  TARGET_CONTAINER="${CONTAINER_NAME}.ui"
+  if ! $DOCKER_BIN inspect "$TARGET_CONTAINER" &>/dev/null 2>&1; then
+    dokku_log_fail "UI container '$TARGET_CONTAINER' does not exist. Is UI enabled and running?"
+  fi
+  dokku_log_info1 "Logs for ${PLUGIN_SERVICE} UI service $SERVICE"
+else
+  TARGET_CONTAINER="$CONTAINER_NAME"
+  if ! $DOCKER_BIN inspect "$TARGET_CONTAINER" &>/dev/null 2>&1; then
+    dokku_log_fail "${PLUGIN_SERVICE} service '$SERVICE' container does not exist. Is the service running?"
+  fi
+  dokku_log_info1 "Logs for ${PLUGIN_SERVICE} service $SERVICE"
+fi
+
+# Build docker logs command
+LOG_ARGS=("$DOCKER_BIN" logs "--tail=${TAIL_LINES}")
+if [[ "$FOLLOW" == "true" ]]; then
+  LOG_ARGS+=("--follow")
+fi
+LOG_ARGS+=("$TARGET_CONTAINER")
+
+"${LOG_ARGS[@]}"

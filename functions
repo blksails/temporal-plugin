@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config"
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+# Public functions exposed to other plugins.
+# These functions are sourced by other Dokku plugins that need to
+# interact with the Temporal service.
+#
+# Usage from another plugin:
+#   source "$DOKKU_PLUGIN_PATH/temporal/functions"
+#
+# Available functions (to be implemented in future phases):
+#   temporal_service_exists <service>
+#   temporal_service_url <service>
+#   temporal_service_status <service>

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../config"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../common-functions"
+
+SERVICE="$1"
+
+require_service "$SERVICE"
+
+SERVICE_ROOT="$(service_root "$SERVICE")"
+PORT_MAP_FILE="$SERVICE_ROOT/PORT_MAP"
+
+if [[ ! -f "$PORT_MAP_FILE" ]]; then
+  dokku_log_warn "${PLUGIN_SERVICE} service '$SERVICE' has no exposed ports"
+  exit 0
+fi
+
+# Show what is being removed
+dokku_log_info1 "Removing expose configuration for ${PLUGIN_SERVICE} service $SERVICE"
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  dokku_log_info2 "Removing: $line"
+done < "$PORT_MAP_FILE"
+
+rm -f "$PORT_MAP_FILE"
+
+dokku_log_info1 "Expose configuration removed for ${PLUGIN_SERVICE} service $SERVICE"
+dokku_log_warn "Restart the service for changes to take effect: dokku ${PLUGIN_COMMAND_PREFIX}:restart $SERVICE"

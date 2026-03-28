@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../config"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../common-functions"
+
+SERVICE="$1"
+APP="$2"
+
+require_service "$SERVICE"
+
+if [[ -z "$APP" ]]; then
+  dokku_log_fail "Please specify an app name"
+fi
+
+SERVICE_ROOT="$(service_root "$SERVICE")"
+
+if [[ -f "$SERVICE_ROOT/LINKS" ]] && grep -qxF "$APP" "$SERVICE_ROOT/LINKS"; then
+  exit 0
+else
+  exit 1
+fi

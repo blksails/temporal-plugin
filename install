@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config"
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common-functions"
+
+dokku_log_info1 "Installing ${PLUGIN_SERVICE} plugin..."
+
+# Pull required Docker images
+for image_and_version in \
+  "${PLUGIN_IMAGE}:${PLUGIN_IMAGE_VERSION}" \
+  "${PLUGIN_UI_IMAGE}:${PLUGIN_UI_IMAGE_VERSION}" \
+  "${PLUGIN_AMBASSADOR_IMAGE}:${PLUGIN_AMBASSADOR_IMAGE_VERSION}" \
+  "${PLUGIN_WAIT_IMAGE}:${PLUGIN_WAIT_IMAGE_VERSION}"; do
+  dokku_log_info2 "Pulling ${image_and_version}..."
+  if ! $DOCKER_BIN image pull "${image_and_version}" 2>&1 | tail -1; then
+    dokku_log_warn "Failed to pull ${image_and_version}. Continuing..."
+  fi
+done
+
+# Create the base data directory
+if [[ ! -d "$PLUGIN_BASE_PATH" ]]; then
+  dokku_log_info2 "Creating ${PLUGIN_SERVICE} base directory: ${PLUGIN_BASE_PATH}"
+  mkdir -p "$PLUGIN_BASE_PATH"
+  chown -R dokku:dokku "$PLUGIN_BASE_PATH" 2>/dev/null || true
+fi
+
+dokku_log_info1 "${PLUGIN_SERVICE} plugin installed."

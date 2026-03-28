@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../config"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../common-functions"
+
+SERVICE="$1"
+KEY="$2"
+VALUE="${3:-}"
+
+require_service "$SERVICE"
+
+SERVICE_ROOT="$(service_root "$SERVICE")"
+
+# Allowed keys
+ALLOWED_KEYS=(
+  POSTGRES_HOST
+  POSTGRES_PORT
+  POSTGRES_USER
+  POSTGRES_PWD
+  POSTGRES_DB
+  POSTGRES_DB_VISIBILITY
+  POSTGRES_TLS
+  DATABASE_URL
+  IMAGE
+  IMAGE_VERSION
+  CONFIG_OPTIONS
+  UI_ENABLED
+  AUTOSTART
+)
+
+# Keys treated as credentials (set chmod 600)
+CREDENTIAL_KEYS=(
+  POSTGRES_PWD
+  DATABASE_URL
+)
+
+# Validate key
+VALID_KEY=false
+for allowed in "${ALLOWED_KEYS[@]}"; do
+  if [[ "$KEY" == "$allowed" ]]; then
+    VALID_KEY=true
+    break
+  fi
+done
+
+if [[ "$VALID_KEY" != "true" ]]; then
+  dokku_log_fail "Invalid key '$KEY'. Allowed keys: ${ALLOWED_KEYS[*]}"
+fi
+
+KEY_FILE="$SERVICE_ROOT/$KEY"
+
+if [[ -z "$VALUE" ]]; then
+  # Unset: remove the file
+  if [[ -f "$KEY_FILE" ]]; then
+    rm -f "$KEY_FILE"
+    dokku_log_info1 "Unset ${PLUGIN_SERVICE} service $SERVICE property $KEY"
+  else
+    dokku_log_warn "Property $KEY is not set for ${PLUGIN_SERVICE} service $SERVICE"
+  fi
+else
+  # Set the value
+  echo "$VALUE" > "$KEY_FILE"
+
+  # Apply credential file permissions
+  IS_CREDENTIAL=false
+  for cred_key in "${CREDENTIAL_KEYS[@]}"; do
+    if [[ "$KEY" == "$cred_key" ]]; then
+      IS_CREDENTIAL=true
+      break
+    fi
+  done
+
+  if [[ "$IS_CREDENTIAL" == "true" ]]; then
+    chmod 600 "$KEY_FILE"
+  fi
+
+  dokku_log_info1 "Set ${PLUGIN_SERVICE} service $SERVICE property $KEY"
+fi
+
+# Output current configuration summary
+dokku_log_info2 "Current configuration:"
+for k in "${ALLOWED_KEYS[@]}"; do
+  if [[ -f "$SERVICE_ROOT/$k" ]]; then
+    VAL="$(cat "$SERVICE_ROOT/$k")"
+    # Mask credential values
+    IS_CRED=false
+    for cred_key in "${CREDENTIAL_KEYS[@]}"; do
+      if [[ "$k" == "$cred_key" ]]; then
+        IS_CRED=true
+        break
+      fi
+    done
+    if [[ "$IS_CRED" == "true" ]]; then
+      dokku_log_info2 "  $k=****"
+    else
+      dokku_log_info2 "  $k=$VAL"
+    fi
+  fi
+done

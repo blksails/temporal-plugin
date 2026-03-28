@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Trigger: pre-restore
+# When a Dokku app is restored from backup, re-establish Temporal link relationships.
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common-functions"
+
+APP="$1"
+
+[[ -z "$APP" ]] && exit 0
+
+[[ -d "$PLUGIN_BASE_PATH" ]] || exit 0
+
+for service_dir in "$PLUGIN_BASE_PATH"/*/; do
+  [[ -d "$service_dir" ]] || continue
+  SERVICE="$(basename "$service_dir")"
+  LINKS_FILE="${service_dir}LINKS"
+
+  if [[ -f "$LINKS_FILE" ]] && grep -qxF "$APP" "$LINKS_FILE"; then
+    dokku_log_info1 "Restoring ${PLUGIN_SERVICE} link for app '$APP' to service '$SERVICE'..."
+
+    # Check if Temporal service is running; start it if needed
+    CONTAINER_NAME="$(service_container_name "$SERVICE")"
+    if ! is_container_running "$CONTAINER_NAME"; then
+      dokku_log_info2 "Starting ${PLUGIN_SERVICE} service '$SERVICE'..."
+      dokku "${PLUGIN_COMMAND_PREFIX}:start" "$SERVICE" || \
+        dokku_log_warn "Failed to start ${PLUGIN_SERVICE} service '$SERVICE'"
+    fi
+
+    # Re-inject environment variables
+    TEMPORAL_URL="${PLUGIN_SCHEME}://${CONTAINER_NAME}:7233"
+    TEMPORAL_ADDRESS="${CONTAINER_NAME}:7233"
+
+    dokku config:set --no-restart "$APP" \
+      "TEMPORAL_URL=${TEMPORAL_URL}" \
+      "TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS}" \
+      2>/dev/null || dokku_log_warn "Failed to set env vars for app '$APP'"
+  fi
+done

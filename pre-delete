@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Trigger: pre-delete
+# When a Dokku app is about to be deleted, unlink it from all Temporal services.
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common-functions"
+
+APP="$1"
+
+[[ -z "$APP" ]] && exit 0
+
+[[ -d "$PLUGIN_BASE_PATH" ]] || exit 0
+
+for service_dir in "$PLUGIN_BASE_PATH"/*/; do
+  [[ -d "$service_dir" ]] || continue
+  SERVICE="$(basename "$service_dir")"
+  LINKS_FILE="${service_dir}LINKS"
+
+  if [[ -f "$LINKS_FILE" ]] && grep -qxF "$APP" "$LINKS_FILE"; then
+    dokku_log_info1 "Removing link between ${PLUGIN_SERVICE} service '$SERVICE' and app '$APP'..."
+
+    # Remove TEMPORAL_* vars from the app config without restarting (app is being deleted)
+    dokku config:unset --no-restart "$APP" \
+      TEMPORAL_URL \
+      TEMPORAL_ADDRESS \
+      TEMPORAL_NAMESPACE \
+      2>/dev/null || true
+
+    # Remove the app from the LINKS file
+    LINKS_TMP="$(mktemp)"
+    grep -vxF "$APP" "$LINKS_FILE" > "$LINKS_TMP" 2>/dev/null || true
+    mv "$LINKS_TMP" "$LINKS_FILE"
+  fi
+done

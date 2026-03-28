@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../config"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../common-functions"
+
+SERVICE="$1"
+shift
+
+require_service "$SERVICE"
+
+SERVICE_ROOT="$(service_root "$SERVICE")"
+CONTAINER_NAME="$(service_container_name "$SERVICE")"
+
+# Parse flags and ports
+BIND_ADDR="127.0.0.1"
+PUBLIC=false
+PORTS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --public)
+      PUBLIC=true
+      shift
+      ;;
+    [0-9]*)
+      PORTS+=("$1")
+      shift
+      ;;
+    -*)
+      dokku_log_fail "Unknown flag '$1'"
+      ;;
+    *)
+      # Non-flag, non-numeric argument treated as an invalid port
+      dokku_log_fail "Invalid port '$1'. Port must be a number between 1024 and 65535."
+      ;;
+  esac
+done
+
+# Default ports: always expose gRPC 7233, add UI port if enabled
+if [[ ${#PORTS[@]} -eq 0 ]]; then
+  PORTS=(7233)
+  UI_ENABLED="$(cat "$SERVICE_ROOT/UI_ENABLED" 2>/dev/null || echo "false")"
+  if [[ "$UI_ENABLED" == "true" ]]; then
+    UI_PORT="$(cat "$SERVICE_ROOT/UI_PORT" 2>/dev/null || echo "8233")"
+    PORTS+=("$UI_PORT")
+  fi
+fi
+
+# Handle --public flag
+if [[ "$PUBLIC" == "true" ]]; then
+  BIND_ADDR="0.0.0.0"
+  dokku_log_warn "SECURITY WARNING: You are about to expose Temporal ports to 0.0.0.0 (all interfaces)."
+  dokku_log_warn "Temporal's gRPC API has NO built-in authentication or authorization."
+  dokku_log_warn "Anyone with network access to this host will be able to connect to Temporal."
+  dokku_log_warn "Ensure your firewall rules strictly restrict access to trusted IP ranges."
+  dokku_log_warn "This is NOT recommended for production environments without a reverse proxy."
+  echo -n "!      Type 'yes' to confirm public exposure: " >&2
+  read -r CONFIRM
+  if [[ "$CONFIRM" != "yes" ]]; then
+    dokku_log_fail "Aborted. Use without --public to bind to 127.0.0.1 (safe default)."
+  fi
+fi
+
+# Validate ports
+for PORT in "${PORTS[@]}"; do
+  if ! echo "$PORT" | grep -qE '^[0-9]+$'; then
+    dokku_log_fail "Invalid port '$PORT'. Port must be a number."
+  fi
+  if [[ "$PORT" -lt 1024 ]] || [[ "$PORT" -gt 65535 ]]; then
+    dokku_log_fail "Invalid port '$PORT'. Port must be between 1024 and 65535."
+  fi
+done
+
+# Write PORT_MAP file: format "bind_addr:host_port:container_port" per line
+PORT_MAP_FILE="$SERVICE_ROOT/PORT_MAP"
+> "$PORT_MAP_FILE"
+
+for PORT in "${PORTS[@]}"; do
+  # For gRPC port, map to container port 7233
+  if [[ "$PORT" == "7233" ]]; then
+    echo "${BIND_ADDR}:7233:7233" >> "$PORT_MAP_FILE"
+  else
+    # For other ports (e.g. UI), map host_port:container_port with the same number
+    echo "${BIND_ADDR}:${PORT}:${PORT}" >> "$PORT_MAP_FILE"
+  fi
+done
+
+chmod 600 "$PORT_MAP_FILE"
+
+dokku_log_info1 "Expose configuration saved for ${PLUGIN_SERVICE} service $SERVICE"
+for PORT in "${PORTS[@]}"; do
+  dokku_log_info2 "${BIND_ADDR}:${PORT}"
+done
+dokku_log_warn "Restart the service for changes to take effect: dokku ${PLUGIN_COMMAND_PREFIX}:restart $SERVICE"

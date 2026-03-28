@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../config"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../common-functions"
+
+SERVICE="$1"
+
+require_service "$SERVICE"
+
+SERVICE_ROOT="$(service_root "$SERVICE")"
+CONTAINER_NAME="$(service_container_name "$SERVICE")"
+
+# Check if container is already running
+if is_container_running "$CONTAINER_NAME"; then
+  dokku_log_fail "${PLUGIN_SERVICE} service '$SERVICE' is already running"
+fi
+
+# Remove any stopped container with the same name
+if $DOCKER_BIN inspect "$CONTAINER_NAME" &>/dev/null 2>&1; then
+  dokku_log_info2 "Removing stopped container $CONTAINER_NAME"
+  $DOCKER_BIN rm "$CONTAINER_NAME" 2>/dev/null || true
+fi
+
+# Load image info
+IMAGE="$(cat "$SERVICE_ROOT/IMAGE" 2>/dev/null || echo "$PLUGIN_IMAGE")"
+IMAGE_VERSION="$(cat "$SERVICE_ROOT/IMAGE_VERSION" 2>/dev/null || echo "$PLUGIN_IMAGE_VERSION")"
+CONFIG_OPTIONS="$(cat "$SERVICE_ROOT/CONFIG_OPTIONS" 2>/dev/null || echo "")"
+
+# Load PostgreSQL environment
+get_postgres_env "$SERVICE"
+
+dokku_log_info1 "Starting ${PLUGIN_SERVICE} service $SERVICE"
+dokku_log_info2 "Image: ${IMAGE}:${IMAGE_VERSION}"
+dokku_log_info2 "PostgreSQL host: $PG_HOST:$PG_PORT"
+dokku_log_info2 "Database: $PG_DB"
+
+# Determine network: prefer dokku network
+NETWORK_ARGS=""
+if $DOCKER_BIN network inspect dokku &>/dev/null 2>&1; then
+  NETWORK_ARGS="--network dokku"
+fi
+
+# Build port mapping args from PORT_MAP file
+PORT_ARGS=()
+PORT_MAP_FILE="$SERVICE_ROOT/PORT_MAP"
+if [[ -f "$PORT_MAP_FILE" ]]; then
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    # line format: bind_addr:host_port:container_port
+    PORT_ARGS+=("-p" "$line")
+  done < "$PORT_MAP_FILE"
+fi
+
+# Build docker create command
+DOCKER_ARGS=(
+  "$DOCKER_BIN" create
+  --name "$CONTAINER_NAME"
+  --restart "on-failure:5"
+  --log-opt "max-size=10m"
+  --log-opt "max-file=3"
+  -e "DB=postgres12"
+  -e "DB_PORT=${PG_PORT}"
+  -e "POSTGRES_USER=${PG_USER}"
+  -e "POSTGRES_PWD=${PG_PWD}"
+  -e "POSTGRES_SEEDS=${PG_HOST}"
+  -e "POSTGRES_TLS=${PG_TLS:-false}"
+  -e "POSTGRES_TLS_DISABLE_HOST_VERIFICATION=true"
+  -e "DBNAME=${PG_DB}"
+  -e "VISIBILITY_DBNAME=${PG_DB_VISIBILITY}"
+  -e "DYNAMIC_CONFIG_FILE_PATH=/etc/temporal/config/dynamicconfig/dynamic_config.yaml"
+  -e "DEFAULT_NAMESPACE=default"
+  -v "${SERVICE_ROOT}/dynamicconfig:/etc/temporal/config/dynamicconfig:ro"
+)
+
+if [[ -n "$NETWORK_ARGS" ]]; then
+  DOCKER_ARGS+=($NETWORK_ARGS)
+fi
+
+# Add port mappings from PORT_MAP
+if [[ ${#PORT_ARGS[@]} -gt 0 ]]; then
+  DOCKER_ARGS+=("${PORT_ARGS[@]}")
+fi
+
+# Add any extra config options
+if [[ -n "$CONFIG_OPTIONS" ]]; then
+  # shellcheck disable=SC2206
+  DOCKER_ARGS+=($CONFIG_OPTIONS)
+fi
+
+DOCKER_ARGS+=("${IMAGE}:${IMAGE_VERSION}")
+
+# Create the container
+dokku_log_info2 "Creating container..."
+CONTAINER_ID="$("${DOCKER_ARGS[@]}")"
+
+# Start the container
+$DOCKER_BIN start "$CONTAINER_NAME"
+
+# Store the container ID
+echo "$CONTAINER_ID" > "$SERVICE_ROOT/ID"
+
+dokku_log_info2 "Waiting for ${PLUGIN_SERVICE} to be ready on port 7233..."
+
+# Use dokku/wait to check port readiness
+CONTAINER_IP="$($DOCKER_BIN inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER_NAME" 2>/dev/null || echo "")"
+
+# Wait for the service to be ready (up to 60 seconds)
+WAIT_TIMEOUT=60
+WAIT_INTERVAL=3
+ELAPSED=0
+READY=false
+
+while [[ $ELAPSED -lt $WAIT_TIMEOUT ]]; do
+  if $DOCKER_BIN run --rm \
+    "${NETWORK_ARGS:-}" \
+    "${PLUGIN_WAIT_IMAGE}:${PLUGIN_WAIT_IMAGE_VERSION}" \
+    -wait "tcp://${CONTAINER_NAME}:7233" \
+    -timeout 5s \
+    &>/dev/null 2>&1; then
+    READY=true
+    break
+  fi
+  sleep "$WAIT_INTERVAL"
+  ELAPSED=$((ELAPSED + WAIT_INTERVAL))
+done
+
+if [[ "$READY" != "true" ]]; then
+  dokku_log_warn "${PLUGIN_SERVICE} did not become ready within ${WAIT_TIMEOUT}s"
+  dokku_log_warn "Recent container logs:"
+  $DOCKER_BIN logs --tail 30 "$CONTAINER_NAME" 2>&1 || true
+  echo "" >&2
+  dokku_log_warn "Possible causes:"
+  dokku_log_warn "  1. PostgreSQL host '$PG_HOST' is unreachable"
+  dokku_log_warn "     -> Check: dokku ${PLUGIN_COMMAND_PREFIX}:set $SERVICE POSTGRES_HOST <host>"
+  dokku_log_warn "  2. PostgreSQL credentials are incorrect"
+  dokku_log_warn "     -> Check: dokku ${PLUGIN_COMMAND_PREFIX}:set $SERVICE POSTGRES_USER/POSTGRES_PWD"
+  dokku_log_warn "  3. TLS connection required (Supabase requires TLS)"
+  dokku_log_warn "     -> Fix: dokku ${PLUGIN_COMMAND_PREFIX}:set $SERVICE POSTGRES_TLS true"
+  if [[ "$PG_TLS" == "true" ]] && echo "$PG_HOST" | grep -q "supabase"; then
+    dokku_log_warn "  4. Supabase TLS: certificate verification may be failing"
+    dokku_log_warn "     -> POSTGRES_TLS_DISABLE_HOST_VERIFICATION is already set to true"
+    dokku_log_warn "     -> Verify your Supabase project is active and accepting connections"
+  fi
+  dokku_log_warn "  5. Database '$PG_DB' or '$PG_DB_VISIBILITY' may not exist in PostgreSQL"
+  dokku_log_warn "     -> Temporal auto-setup will create the schema, but the database must pre-exist"
+  dokku_log_fail "Failed to start ${PLUGIN_SERVICE} service '$SERVICE'"
+fi
+
+# Record container IP
+if [[ -n "$CONTAINER_IP" ]]; then
+  echo "$CONTAINER_IP" > "$SERVICE_ROOT/IP"
+fi
+
+# Start UI container if UI_ENABLED
+UI_ENABLED="$(cat "$SERVICE_ROOT/UI_ENABLED" 2>/dev/null || echo "false")"
+if [[ "$UI_ENABLED" == "true" ]]; then
+  UI_CONTAINER_NAME="${CONTAINER_NAME}.ui"
+  UI_PORT="$(cat "$SERVICE_ROOT/UI_PORT" 2>/dev/null || echo "8233")"
+  UI_IMAGE_VERSION="$(cat "$SERVICE_ROOT/UI_IMAGE_VERSION" 2>/dev/null || echo "$PLUGIN_UI_IMAGE_VERSION")"
+
+  # Remove stopped UI container if any
+  if $DOCKER_BIN inspect "$UI_CONTAINER_NAME" &>/dev/null 2>&1; then
+    $DOCKER_BIN rm "$UI_CONTAINER_NAME" 2>/dev/null || true
+  fi
+
+  dokku_log_info2 "Starting UI container on 127.0.0.1:${UI_PORT}..."
+  UI_DOCKER_ARGS=(
+    "$DOCKER_BIN" run -d
+    --name "$UI_CONTAINER_NAME"
+    --restart "on-failure:5"
+    -p "127.0.0.1:${UI_PORT}:8080"
+    -e "TEMPORAL_ADDRESS=${CONTAINER_NAME}:7233"
+  )
+  if [[ -n "$NETWORK_ARGS" ]]; then
+    UI_DOCKER_ARGS+=($NETWORK_ARGS)
+  fi
+  UI_DOCKER_ARGS+=("${PLUGIN_UI_IMAGE}:${UI_IMAGE_VERSION}")
+  "${UI_DOCKER_ARGS[@]}"
+fi
+
+dokku_log_info1 "${PLUGIN_SERVICE} service $SERVICE is ready"
+
+# Register default namespace (non-fatal if it fails)
+SETUP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../scripts/setup-namespace.sh"
+if [[ -x "$SETUP_SCRIPT" ]]; then
+  "$SETUP_SCRIPT" "$CONTAINER_NAME" || true
+fi

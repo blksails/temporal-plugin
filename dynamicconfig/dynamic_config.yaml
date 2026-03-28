@@ -1,0 +1,18 @@
+# Temporal dynamic configuration
+# See: https://docs.temporal.io/references/dynamic-configuration
+#
+# This file is mounted into the Temporal container at:
+#   /etc/temporal/config/dynamicconfig/dynamic_config.yaml
+#
+# Uncomment and adjust values as needed for your deployment.
+# All values listed here override Temporal server defaults.
+
+# Example: limit workflow execution history size
+# limit.maxIDLength:
+#   - value: 255
+#     constraints: {}
+
+# Example: enable search attributes
+# system.enableReadFromSecondary:
+#   - value: true
+#     constraints: {}

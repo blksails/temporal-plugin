@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../config"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../common-functions"
+
+SERVICE="$1"
+APP="$2"
+shift 2
+
+# Parse optional flags
+ALIAS=""
+NAMESPACE="default"
+NO_RESTART=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --alias)
+      ALIAS="${2:?'--alias requires a value'}"
+      shift 2
+      ;;
+    --namespace)
+      NAMESPACE="${2:?'--namespace requires a value'}"
+      shift 2
+      ;;
+    --no-restart)
+      NO_RESTART=true
+      shift
+      ;;
+    *)
+      dokku_log_fail "Unknown option: $1"
+      ;;
+  esac
+done
+
+require_service "$SERVICE"
+
+if [[ -z "$APP" ]]; then
+  dokku_log_fail "Please specify an app name"
+fi
+
+# Check the app exists
+if ! dokku apps:exists "$APP" &>/dev/null 2>&1; then
+  dokku_log_fail "App '$APP' does not exist"
+fi
+
+SERVICE_ROOT="$(service_root "$SERVICE")"
+CONTAINER_NAME="$(service_container_name "$SERVICE")"
+
+# Check if already linked
+if [[ -f "$SERVICE_ROOT/LINKS" ]] && grep -qxF "$APP" "$SERVICE_ROOT/LINKS"; then
+  dokku_log_fail "${PLUGIN_SERVICE} service '$SERVICE' is already linked to app '$APP'"
+fi
+
+# Ensure Temporal container is running; start it if not
+if ! is_container_running "$CONTAINER_NAME"; then
+  dokku_log_info1 "${PLUGIN_SERVICE} service '$SERVICE' is not running. Starting it now..."
+  dokku "${PLUGIN_COMMAND_PREFIX}:start" "$SERVICE"
+fi
+
+# Determine variable prefix
+PREFIX="${ALIAS:-$PLUGIN_DEFAULT_ALIAS}"
+
+# Build the env vars
+TEMPORAL_URL="${PLUGIN_SCHEME}://${CONTAINER_NAME}:7233"
+TEMPORAL_ADDRESS="${CONTAINER_NAME}:7233"
+
+dokku_log_info1 "Linking ${PLUGIN_SERVICE} service $SERVICE to app $APP"
+dokku_log_info2 "Injecting environment variables:"
+dokku_log_info2 "  ${PREFIX}_URL=${TEMPORAL_URL}"
+dokku_log_info2 "  ${PREFIX}_ADDRESS=${TEMPORAL_ADDRESS}"
+dokku_log_info2 "  ${PREFIX}_NAMESPACE=${NAMESPACE}"
+
+if [[ "$NO_RESTART" == "true" ]]; then
+  dokku config:set --no-restart "$APP" \
+    "${PREFIX}_URL=${TEMPORAL_URL}" \
+    "${PREFIX}_ADDRESS=${TEMPORAL_ADDRESS}" \
+    "${PREFIX}_NAMESPACE=${NAMESPACE}"
+else
+  dokku config:set "$APP" \
+    "${PREFIX}_URL=${TEMPORAL_URL}" \
+    "${PREFIX}_ADDRESS=${TEMPORAL_ADDRESS}" \
+    "${PREFIX}_NAMESPACE=${NAMESPACE}"
+fi
+
+# Record the link
+echo "$APP" >> "$SERVICE_ROOT/LINKS"
+
+dokku_log_info1 "${PLUGIN_SERVICE} service $SERVICE linked to app $APP"

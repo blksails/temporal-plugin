@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../config"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../common-functions"
+
+SERVICE="$1"
+SHOW_PASSWORD=false
+
+# Parse flags
+shift
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --show-password)
+      SHOW_PASSWORD=true
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+require_service "$SERVICE"
+
+SERVICE_ROOT="$(service_root "$SERVICE")"
+CONTAINER_NAME="$(service_container_name "$SERVICE")"
+UI_CONTAINER_NAME="${CONTAINER_NAME}.ui"
+
+# Determine status
+if is_container_running "$CONTAINER_NAME"; then
+  STATUS="running"
+else
+  STATUS="stopped"
+fi
+
+# Load configuration
+IMAGE="$(cat "$SERVICE_ROOT/IMAGE" 2>/dev/null || echo "$PLUGIN_IMAGE")"
+IMAGE_VERSION="$(cat "$SERVICE_ROOT/IMAGE_VERSION" 2>/dev/null || echo "$PLUGIN_IMAGE_VERSION")"
+PORT="$(cat "$SERVICE_ROOT/PORT" 2>/dev/null || echo "7233")"
+UI_PORT="$(cat "$SERVICE_ROOT/UI_PORT" 2>/dev/null || echo "8233")"
+
+# PostgreSQL configuration
+PG_HOST="$(cat "$SERVICE_ROOT/POSTGRES_HOST" 2>/dev/null || echo "")"
+PG_PORT_VAL="$(cat "$SERVICE_ROOT/POSTGRES_PORT" 2>/dev/null || echo "5432")"
+PG_USER="$(cat "$SERVICE_ROOT/POSTGRES_USER" 2>/dev/null || echo "")"
+PG_DB="$(cat "$SERVICE_ROOT/POSTGRES_DB" 2>/dev/null || echo "")"
+PG_TLS="$(cat "$SERVICE_ROOT/POSTGRES_TLS" 2>/dev/null || echo "false")"
+
+# Handle DATABASE_URL
+if [[ -f "$SERVICE_ROOT/DATABASE_URL" ]]; then
+  DB_URL="$(cat "$SERVICE_ROOT/DATABASE_URL")"
+  parse_database_url "$DB_URL"
+  PG_HOST="${PG_HOST:-$PG_HOST}"
+  PG_PORT_VAL="${PG_PORT_VAL:-$PG_PORT}"
+  PG_USER="${PG_USER:-$PG_USER}"
+  PG_DB="${PG_DB:-$PG_DB}"
+fi
+
+# Password display
+if [[ "$SHOW_PASSWORD" == "true" ]]; then
+  if [[ -f "$SERVICE_ROOT/POSTGRES_PWD" ]]; then
+    PG_PWD_DISPLAY="$(cat "$SERVICE_ROOT/POSTGRES_PWD")"
+  elif [[ -f "$SERVICE_ROOT/DATABASE_URL" ]]; then
+    local_url="$(cat "$SERVICE_ROOT/DATABASE_URL")"
+    parse_database_url "$local_url"
+    PG_PWD_DISPLAY="$PG_PWD"
+  else
+    PG_PWD_DISPLAY="(not set)"
+  fi
+else
+  PG_PWD_DISPLAY="****"
+fi
+
+# Linked apps
+LINKS=""
+if [[ -f "$SERVICE_ROOT/LINKS" ]]; then
+  LINKS="$(cat "$SERVICE_ROOT/LINKS" | tr '\n' ',' | sed 's/,$//')"
+fi
+[[ -z "$LINKS" ]] && LINKS="(none)"
+
+# UI status
+UI_ENABLED="$(cat "$SERVICE_ROOT/UI_ENABLED" 2>/dev/null || echo "false")"
+if [[ "$UI_ENABLED" == "true" ]] && is_container_running "$UI_CONTAINER_NAME"; then
+  UI_STATUS="running (127.0.0.1:${UI_PORT})"
+elif [[ "$UI_ENABLED" == "true" ]]; then
+  UI_STATUS="enabled (stopped)"
+else
+  UI_STATUS="disabled"
+fi
+
+# Container IP
+CONTAINER_IP="$(cat "$SERVICE_ROOT/IP" 2>/dev/null || echo "(unknown)")"
+
+# Exposed ports
+EXPOSED_PORTS="(none)"
+PORT_MAP_FILE="$SERVICE_ROOT/PORT_MAP"
+if [[ -f "$PORT_MAP_FILE" && -s "$PORT_MAP_FILE" ]]; then
+  EXPOSED_PORTS="$(cat "$PORT_MAP_FILE" | tr '\n' ' ' | sed 's/ $//')"
+fi
+
+echo "=====> ${PLUGIN_SERVICE} service $SERVICE info"
+echo "       Status:          $STATUS"
+echo "       Container:       $CONTAINER_NAME"
+echo "       Image:           ${IMAGE}:${IMAGE_VERSION}"
+echo "       gRPC Port:       $PORT"
+echo "       Container IP:    $CONTAINER_IP"
+echo "       Exposed Ports:   $EXPOSED_PORTS"
+echo "       PG Host:         ${PG_HOST:-"(not set)"}:${PG_PORT_VAL}"
+echo "       PG User:         ${PG_USER:-"(not set)"}"
+echo "       PG Password:     $PG_PWD_DISPLAY"
+echo "       PG Database:     ${PG_DB:-"(not set)"}"
+echo "       PG TLS:          $PG_TLS"
+echo "       Web UI:          $UI_STATUS"
+echo "       Linked Apps:     $LINKS"
+echo "       Data Directory:  $SERVICE_ROOT"

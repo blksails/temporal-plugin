@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../config"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../common-functions"
+
+SERVICE="$1"
+FORCE="${2:-}"
+
+require_service "$SERVICE"
+
+SERVICE_ROOT="$(service_root "$SERVICE")"
+CONTAINER_NAME="$(service_container_name "$SERVICE")"
+UI_CONTAINER_NAME="${CONTAINER_NAME}.ui"
+
+if [[ "$FORCE" != "--force" ]]; then
+  dokku_log_warn "WARNING: Destroying ${PLUGIN_SERVICE} service $SERVICE will delete all associated data."
+  dokku_log_warn "To confirm, type the service name: "
+  read -r CONFIRM
+  if [[ "$CONFIRM" != "$SERVICE" ]]; then
+    dokku_log_fail "Confirmation failed. Aborting."
+  fi
+fi
+
+dokku_log_info1 "Destroying ${PLUGIN_SERVICE} service $SERVICE"
+
+# Stop and remove the main container
+if $DOCKER_BIN inspect "$CONTAINER_NAME" &>/dev/null 2>&1; then
+  dokku_log_info2 "Stopping and removing container $CONTAINER_NAME"
+  $DOCKER_BIN stop "$CONTAINER_NAME" 2>/dev/null || true
+  $DOCKER_BIN rm "$CONTAINER_NAME" 2>/dev/null || true
+fi
+
+# Stop and remove the UI container if it exists
+if $DOCKER_BIN inspect "$UI_CONTAINER_NAME" &>/dev/null 2>&1; then
+  dokku_log_info2 "Stopping and removing UI container $UI_CONTAINER_NAME"
+  $DOCKER_BIN stop "$UI_CONTAINER_NAME" 2>/dev/null || true
+  $DOCKER_BIN rm "$UI_CONTAINER_NAME" 2>/dev/null || true
+fi
+
+# Clean up links - unset environment variables from linked apps
+if [[ -f "$SERVICE_ROOT/LINKS" ]]; then
+  while IFS= read -r app; do
+    [[ -z "$app" ]] && continue
+    dokku_log_info2 "Unlinking app $app"
+    dokku config:unset --no-restart "$app" \
+      "TEMPORAL_URL" \
+      "TEMPORAL_ADDRESS" \
+      "TEMPORAL_NAMESPACE" \
+      2>/dev/null || true
+  done < "$SERVICE_ROOT/LINKS"
+fi
+
+# Remove the service directory
+dokku_log_info2 "Removing service directory $SERVICE_ROOT"
+rm -rf "$SERVICE_ROOT"
+
+dokku_log_info1 "${PLUGIN_SERVICE} service $SERVICE destroyed"

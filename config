@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+export PLUGIN_COMMAND_PREFIX="temporal"
+export PLUGIN_SERVICE="Temporal"
+export PLUGIN_VARIABLE="TEMPORAL"
+export PLUGIN_DEFAULT_ALIAS="TEMPORAL"
+export PLUGIN_SCHEME="temporal"
+export PLUGIN_DATASTORE_PORTS=(7233)
+export PLUGIN_DATASTORE_WAIT_PORT=7233
+export PLUGIN_IMAGE="temporalio/auto-setup"
+export PLUGIN_IMAGE_VERSION="1.25.2"
+export PLUGIN_UI_IMAGE="temporalio/ui"
+export PLUGIN_UI_IMAGE_VERSION="2.32.0"
+export PLUGIN_AMBASSADOR_IMAGE="dokku/ambassador"
+export PLUGIN_AMBASSADOR_IMAGE_VERSION="0.8.2"
+export PLUGIN_WAIT_IMAGE="dokku/wait"
+export PLUGIN_WAIT_IMAGE_VERSION="0.9.3"
+
+export DOKKU_LIB_ROOT="${DOKKU_LIB_ROOT:-/var/lib/dokku}"
+export PLUGIN_BASE_PATH="$DOKKU_LIB_ROOT/services/temporal"
+
+if [[ -z "${DOCKER_BIN:-}" ]]; then
+  if command -v nerdctl &>/dev/null; then
+    export DOCKER_BIN="nerdctl"
+  else
+    export DOCKER_BIN="docker"
+  fi
+fi

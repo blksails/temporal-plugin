@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config"
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/help-functions"
+
+PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+cmd-temporal-help() {
+  declare desc="help for the temporal plugin"
+  declare CMD="$1"
+  if [[ "$CMD" == "${PLUGIN_COMMAND_PREFIX}:help" ]]; then
+    echo "Usage: dokku ${PLUGIN_COMMAND_PREFIX}[:COMMAND] [--]"
+    echo ""
+    echo "Manage a ${PLUGIN_SERVICE} service."
+    echo ""
+    echo "Additional commands:"
+    help_content
+  else
+    help_list
+  fi
+}
+
+subcommand="$1"
+case "$subcommand" in
+  "${PLUGIN_COMMAND_PREFIX}:help")
+    cmd-temporal-help "$subcommand"
+    ;;
+  "help")
+    cmd-temporal-help "$subcommand"
+    ;;
+  "${PLUGIN_COMMAND_PREFIX}:"*)
+    # Strip the "temporal:" prefix to get the subcommand name
+    subcmd="${subcommand#${PLUGIN_COMMAND_PREFIX}:}"
+    subcommand_file="${PLUGIN_DIR}/subcommands/${subcmd}"
+    if [[ -x "$subcommand_file" ]]; then
+      shift 1
+      "$subcommand_file" "$@"
+    else
+      echo "Unknown command: $subcommand" 1>&2
+      echo "Run 'dokku ${PLUGIN_COMMAND_PREFIX}:help' for a list of commands." 1>&2
+      exit 1
+    fi
+    ;;
+  *)
+    exit "$DOKKU_NOT_IMPLEMENTED_EXIT"
+    ;;
+esac

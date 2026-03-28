@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../config"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../common-functions"
+
+SERVICE="$1"
+APP="$2"
+shift 2
+
+# Parse optional flags
+NO_RESTART=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-restart)
+      NO_RESTART=true
+      shift
+      ;;
+    *)
+      dokku_log_fail "Unknown option: $1"
+      ;;
+  esac
+done
+
+require_service "$SERVICE"
+
+if [[ -z "$APP" ]]; then
+  dokku_log_fail "Please specify an app name"
+fi
+
+# Check the app exists
+if ! dokku apps:exists "$APP" &>/dev/null 2>&1; then
+  dokku_log_fail "App '$APP' does not exist"
+fi
+
+SERVICE_ROOT="$(service_root "$SERVICE")"
+CONTAINER_NAME="$(service_container_name "$SERVICE")"
+
+# Check if linked
+if [[ ! -f "$SERVICE_ROOT/LINKS" ]] || ! grep -qxF "$APP" "$SERVICE_ROOT/LINKS"; then
+  dokku_log_fail "${PLUGIN_SERVICE} service '$SERVICE' is not linked to app '$APP'"
+fi
+
+dokku_log_info1 "Unlinking ${PLUGIN_SERVICE} service $SERVICE from app $APP"
+
+# Collect all config keys that reference this service's container
+VARS_TO_UNSET=()
+while IFS= read -r line; do
+  key="${line%%:*}"
+  key="${key// /}"
+  val="${line#*: }"
+  if [[ "$val" == *"${CONTAINER_NAME}"* ]]; then
+    VARS_TO_UNSET+=("$key")
+  fi
+done < <(dokku config:show "$APP" 2>/dev/null || true)
+
+# Also check TEMPORAL_NAMESPACE which may not reference the container name
+NS_VAL="$(dokku config:get "$APP" "TEMPORAL_NAMESPACE" 2>/dev/null || true)"
+if [[ -n "$NS_VAL" ]]; then
+  # Only remove if we're removing other TEMPORAL_ vars (i.e., this link owns them)
+  NS_IN_LIST=false
+  for v in "${VARS_TO_UNSET[@]:-}"; do
+    [[ "$v" == "TEMPORAL_NAMESPACE" ]] && NS_IN_LIST=true && break
+  done
+  if [[ "$NS_IN_LIST" == "false" && ${#VARS_TO_UNSET[@]} -gt 0 ]]; then
+    VARS_TO_UNSET+=("TEMPORAL_NAMESPACE")
+  fi
+fi
+
+if [[ ${#VARS_TO_UNSET[@]} -gt 0 ]]; then
+  dokku_log_info2 "Removing environment variables: ${VARS_TO_UNSET[*]}"
+  if [[ "$NO_RESTART" == "true" ]]; then
+    dokku config:unset --no-restart "$APP" "${VARS_TO_UNSET[@]}"
+  else
+    dokku config:unset "$APP" "${VARS_TO_UNSET[@]}"
+  fi
+else
+  dokku_log_warn "No ${PLUGIN_SERVICE} environment variables found for app '$APP' pointing to service '$SERVICE'"
+fi
+
+# Remove the app from LINKS file
+LINKS_TMP="$(mktemp)"
+grep -vxF "$APP" "$SERVICE_ROOT/LINKS" > "$LINKS_TMP" 2>/dev/null || true
+mv "$LINKS_TMP" "$SERVICE_ROOT/LINKS"
+
+dokku_log_info1 "${PLUGIN_SERVICE} service $SERVICE unlinked from app $APP"

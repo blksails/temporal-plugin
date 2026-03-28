@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config"
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+service_root() {
+  declare desc="returns the service root directory"
+  declare SERVICE="$1"
+  echo "$PLUGIN_BASE_PATH/$SERVICE"
+}
+
+service_exists() {
+  declare desc="returns 0 if the service exists, 1 otherwise"
+  declare SERVICE="$1"
+  local SERVICE_ROOT
+  SERVICE_ROOT="$(service_root "$SERVICE")"
+  [[ -d "$SERVICE_ROOT" ]]
+}
+
+service_container_name() {
+  declare desc="returns the docker container name for the service"
+  declare SERVICE="$1"
+  echo "dokku.temporal.$SERVICE"
+}
+
+is_container_running() {
+  declare desc="returns 0 if the container is running, 1 otherwise"
+  declare CONTAINER_NAME="$1"
+  local STATUS
+  STATUS="$($DOCKER_BIN inspect --format '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+  [[ "$STATUS" == "true" ]]
+}
+
+verify_service_name() {
+  declare desc="verifies the service name is valid (lowercase alphanumeric and hyphens, 1-32 chars)"
+  declare SERVICE="$1"
+  if [[ -z "$SERVICE" ]]; then
+    dokku_log_fail "Please specify a service name"
+  fi
+  if ! echo "$SERVICE" | grep -qE '^[a-z0-9][a-z0-9-]{0,31}$'; then
+    dokku_log_fail "Invalid service name '$SERVICE'. Must be lowercase alphanumeric and hyphens (1-32 chars), starting with alphanumeric."
+  fi
+}
+
+require_service() {
+  declare desc="fails if the service does not exist"
+  declare SERVICE="$1"
+  verify_service_name "$SERVICE"
+  if ! service_exists "$SERVICE"; then
+    dokku_log_fail "${PLUGIN_SERVICE} service '$SERVICE' does not exist"
+  fi
+}
+
+dokku_log_info1() {
+  declare desc="log an info line with a single indent"
+  echo "-----> $*"
+}
+
+dokku_log_info2() {
+  declare desc="log an info line with a double indent"
+  echo "       $*"
+}
+
+dokku_log_fail() {
+  declare desc="log a failure message and exit 1"
+  echo "$*" 1>&2
+  exit 1
+}
+
+dokku_log_warn() {
+  declare desc="log a warning message"
+  echo "!      $*" 1>&2
+}
+
+# parse_database_url <url> <varname>
+# Parses a postgres DATABASE_URL into component variables.
+# Sets: PG_USER, PG_PWD, PG_HOST, PG_PORT, PG_DB in the caller's scope.
+# Usage: parse_database_url "$url" && echo "$PG_HOST"
+parse_database_url() {
+  declare desc="parses a DATABASE_URL into component fields"
+  declare URL="$1"
+
+  # Validate DATABASE_URL format
+  if [[ -z "$URL" ]]; then
+    dokku_log_fail "DATABASE_URL is empty"
+  fi
+  if ! echo "$URL" | grep -qE '^postgres(ql)?://[^:]+:[^@]*@[^/:]+'; then
+    dokku_log_fail "Invalid DATABASE_URL format. Expected: postgres://user:password@host:port/dbname"
+  fi
+
+  # Strip scheme (postgres:// or postgresql://)
+  local rest="${URL#postgres://}"
+  rest="${rest#postgresql://}"
+
+  # Extract user:pwd@host:port/db
+  local userinfo="${rest%%@*}"
+  local hostpart="${rest#*@}"
+
+  PG_USER="${userinfo%%:*}"
+  PG_PWD="${userinfo#*:}"
+
+  local hostport="${hostpart%%/*}"
+  PG_DB="${hostpart#*/}"
+  # Strip query string from db name
+  PG_DB="${PG_DB%%\?*}"
+
+  PG_HOST="${hostport%%:*}"
+  local port_part="${hostport#*:}"
+  if [[ "$port_part" == "$hostport" ]]; then
+    PG_PORT="5432"
+  else
+    PG_PORT="$port_part"
+    # Validate port number
+    if ! echo "$PG_PORT" | grep -qE '^[0-9]+$' || [[ "$PG_PORT" -lt 1 ]] || [[ "$PG_PORT" -gt 65535 ]]; then
+      dokku_log_fail "Invalid port in DATABASE_URL: '$PG_PORT'. Must be a number between 1 and 65535."
+    fi
+  fi
+
+  # Validate required fields extracted from URL
+  if [[ -z "$PG_HOST" ]]; then
+    dokku_log_fail "Could not extract host from DATABASE_URL"
+  fi
+  if [[ -z "$PG_USER" ]]; then
+    dokku_log_fail "Could not extract user from DATABASE_URL"
+  fi
+}
+
+# get_postgres_env <service>
+# Reads PG configuration for the service, populates variables:
+#   PG_HOST, PG_PORT, PG_USER, PG_PWD, PG_DB, PG_DB_VISIBILITY, PG_TLS
+get_postgres_env() {
+  declare desc="reads postgres configuration from service files into environment variables"
+  declare SERVICE="$1"
+  local SERVICE_ROOT
+  SERVICE_ROOT="$(service_root "$SERVICE")"
+
+  # Check for DATABASE_URL first
+  if [[ -f "$SERVICE_ROOT/DATABASE_URL" ]]; then
+    local DB_URL
+    DB_URL="$(cat "$SERVICE_ROOT/DATABASE_URL")"
+    parse_database_url "$DB_URL"
+    # Still allow file-based overrides
+    [[ -f "$SERVICE_ROOT/POSTGRES_DB" ]] && PG_DB="$(cat "$SERVICE_ROOT/POSTGRES_DB")"
+    [[ -f "$SERVICE_ROOT/POSTGRES_TLS" ]] && PG_TLS="$(cat "$SERVICE_ROOT/POSTGRES_TLS")"
+  else
+    PG_HOST="$(cat "$SERVICE_ROOT/POSTGRES_HOST" 2>/dev/null || echo "")"
+    PG_PORT="$(cat "$SERVICE_ROOT/POSTGRES_PORT" 2>/dev/null || echo "5432")"
+    PG_USER="$(cat "$SERVICE_ROOT/POSTGRES_USER" 2>/dev/null || echo "")"
+    PG_PWD="$(cat "$SERVICE_ROOT/POSTGRES_PWD" 2>/dev/null || echo "")"
+    PG_DB="$(cat "$SERVICE_ROOT/POSTGRES_DB" 2>/dev/null || echo "temporal")"
+    PG_TLS="$(cat "$SERVICE_ROOT/POSTGRES_TLS" 2>/dev/null || echo "false")"
+  fi
+
+  PG_DB_VISIBILITY="$(cat "$SERVICE_ROOT/POSTGRES_DB_VISIBILITY" 2>/dev/null || echo "${PG_DB}_visibility")"
+
+  # Validate required fields
+  if [[ -z "$PG_HOST" ]]; then
+    dokku_log_fail "PostgreSQL host not configured. Run: dokku ${PLUGIN_COMMAND_PREFIX}:set $SERVICE POSTGRES_HOST <host>"
+  fi
+  if [[ -z "$PG_USER" ]]; then
+    dokku_log_fail "PostgreSQL user not configured. Run: dokku ${PLUGIN_COMMAND_PREFIX}:set $SERVICE POSTGRES_USER <user>"
+  fi
+}
+
+# get_service_url <service>
+# Outputs temporal://<container-name>:7233
+get_service_url() {
+  declare desc="returns the temporal:// URL for the service"
+  declare SERVICE="$1"
+  local CONTAINER_NAME
+  CONTAINER_NAME="$(service_container_name "$SERVICE")"
+  echo "${PLUGIN_SCHEME}://${CONTAINER_NAME}:7233"
+}
+
+# docker_ports_options <service>
+# Outputs docker port mapping options for the service
+docker_ports_options() {
+  declare desc="returns docker port mapping options for the service"
+  declare SERVICE="$1"
+  local SERVICE_ROOT PORT
+  SERVICE_ROOT="$(service_root "$SERVICE")"
+  PORT="$(cat "$SERVICE_ROOT/PORT" 2>/dev/null || echo "7233")"
+  echo "-p 127.0.0.1:${PORT}:7233"
+}

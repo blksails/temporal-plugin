@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common-functions"
+
+# post-dokku-startup trigger: auto-start Temporal services marked with AUTOSTART=true
+
+if [[ ! -d "$PLUGIN_BASE_PATH" ]]; then
+  exit 0
+fi
+
+# Collect all service directories
+SERVICES=()
+while IFS= read -r -d '' dir; do
+  SERVICE="$(basename "$dir")"
+  SERVICES+=("$SERVICE")
+done < <(find "$PLUGIN_BASE_PATH" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+
+if [[ ${#SERVICES[@]} -eq 0 ]]; then
+  exit 0
+fi
+
+dokku_log_info1 "Checking ${PLUGIN_SERVICE} services for auto-start..."
+
+STARTED=()
+SKIPPED=()
+FAILED=()
+
+for SERVICE in "${SERVICES[@]}"; do
+  SERVICE_ROOT="$(service_root "$SERVICE")"
+
+  # Read AUTOSTART flag (default: true)
+  AUTOSTART="true"
+  if [[ -f "$SERVICE_ROOT/AUTOSTART" ]]; then
+    AUTOSTART="$(cat "$SERVICE_ROOT/AUTOSTART")"
+  fi
+
+  if [[ "$AUTOSTART" != "true" ]]; then
+    dokku_log_info2 "Skipping $SERVICE (AUTOSTART=false)"
+    SKIPPED+=("$SERVICE")
+    continue
+  fi
+
+  CONTAINER_NAME="$(service_container_name "$SERVICE")"
+
+  # Skip if already running
+  if is_container_running "$CONTAINER_NAME"; then
+    dokku_log_info2 "Skipping $SERVICE (already running)"
+    SKIPPED+=("$SERVICE")
+    continue
+  fi
+
+  dokku_log_info2 "Starting $SERVICE..."
+
+  # Run start subcommand; trap failure so other services are not affected
+  START_CMD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/subcommands/start"
+  if [[ -x "$START_CMD" ]]; then
+    if ("$START_CMD" "$SERVICE"); then
+      STARTED+=("$SERVICE")
+    else
+      dokku_log_warn "Failed to start ${PLUGIN_SERVICE} service '$SERVICE'"
+      FAILED+=("$SERVICE")
+    fi
+  else
+    dokku_log_warn "Start subcommand not found: $START_CMD"
+    FAILED+=("$SERVICE")
+  fi
+done
+
+# Summary
+if [[ ${#STARTED[@]} -gt 0 ]]; then
+  dokku_log_info1 "${PLUGIN_SERVICE} services started: ${STARTED[*]}"
+fi
+if [[ ${#SKIPPED[@]} -gt 0 ]]; then
+  dokku_log_info2 "Skipped: ${SKIPPED[*]}"
+fi
+if [[ ${#FAILED[@]} -gt 0 ]]; then
+  dokku_log_warn "${PLUGIN_SERVICE} services failed to start: ${FAILED[*]}"
+fi
