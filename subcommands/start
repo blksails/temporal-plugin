@@ -113,12 +113,10 @@ ELAPSED=0
 READY=false
 
 while [[ $ELAPSED -lt $WAIT_TIMEOUT ]]; do
-  if $DOCKER_BIN run --rm \
-    "${NETWORK_ARGS:-}" \
-    "${PLUGIN_WAIT_IMAGE}:${PLUGIN_WAIT_IMAGE_VERSION}" \
-    -wait "tcp://${CONTAINER_NAME}:7233" \
-    -timeout 5s \
-    &>/dev/null 2>&1; then
+  # Temporal binds to the container IP, not localhost
+  # Resolve the container IP and use tctl with explicit address
+  CHECK_IP="$($DOCKER_BIN inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER_NAME" 2>/dev/null || echo "")"
+  if [[ -n "$CHECK_IP" ]] && $DOCKER_BIN exec "$CONTAINER_NAME" tctl --address "${CHECK_IP}:7233" cluster health 2>/dev/null | grep -q "SERVING"; then
     READY=true
     break
   fi

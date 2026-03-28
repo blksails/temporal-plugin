@@ -21,16 +21,20 @@ if [[ -z "${DOCKER_BIN:-}" ]]; then
   fi
 fi
 
+# Resolve container IP for tctl --address
+CONTAINER_IP="$($DOCKER_BIN inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER_NAME" 2>/dev/null || echo "")"
+TCTL_ADDR="${CONTAINER_IP:+--address ${CONTAINER_IP}:7233}"
+
 echo "-----> Ensuring 'default' namespace exists..."
 
 # Check if the namespace already exists
-if $DOCKER_BIN exec "$CONTAINER_NAME" tctl --namespace default namespace describe &>/dev/null 2>&1; then
+if $DOCKER_BIN exec "$CONTAINER_NAME" tctl $TCTL_ADDR --namespace default namespace describe &>/dev/null 2>&1; then
   echo "       Namespace 'default' already exists"
   exit 0
 fi
 
 # Register the default namespace
-if $DOCKER_BIN exec "$CONTAINER_NAME" tctl --namespace default namespace register 2>&1; then
+if $DOCKER_BIN exec "$CONTAINER_NAME" tctl $TCTL_ADDR --namespace default namespace register 2>&1; then
   echo "       Namespace 'default' registered"
 else
   echo "!      Failed to register 'default' namespace (may already exist or service not ready)" >&2
