@@ -80,8 +80,13 @@ UI_PORT_VAL="$(cat "$SERVICE_ROOT/UI_PORT" 2>/dev/null || echo "8233")"
 MAIN_PORTS=()
 PUBLISH_UI=false
 for PORT in "${PORTS[@]}"; do
-  if [[ "$UI_ENABLED" == "true" ]] && [[ "$PORT" == "$UI_PORT_VAL" ]]; then
-    PUBLISH_UI=true
+  if [[ "$PORT" == "$UI_PORT_VAL" ]]; then
+    # Host UI_PORT is always served by the UI container (host -> container 8080), never by the server image.
+    if [[ "$UI_ENABLED" == "true" ]]; then
+      PUBLISH_UI=true
+    else
+      dokku_log_warn "Port ${UI_PORT_VAL} is reserved for Web UI; it is not mapped on the Temporal server container. Enable UI with ${PLUGIN_COMMAND_PREFIX}:set $SERVICE UI_ENABLED true to publish it."
+    fi
     continue
   fi
   MAIN_PORTS+=("$PORT")

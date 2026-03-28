@@ -164,6 +164,7 @@ dokku temporal:set <service> <KEY>
 | `IMAGE_VERSION` | Docker 镜像版本（默认 1.25.2） |
 | `CONFIG_OPTIONS` | 额外 docker run 参数（如资源限制） |
 | `UI_ENABLED` | 启用 Web UI（true/false） |
+| `UI_PORT` | Web UI 宿主机端口（默认 8233；若端口冲突可改为如 8234） |
 | `AUTOSTART` | Dokku 重启后自动启动（true/false，默认 true） |
 
 ### 应用链接

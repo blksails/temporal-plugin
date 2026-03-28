@@ -112,6 +112,20 @@ load "helpers"
   [[ "$output" == *"Invalid key"* ]]
 }
 
+@test "set: UI_PORT accepts valid port" {
+  create_service_fixture "testsvc"
+  run bash "$PLUGIN_DIR/subcommands/set" "testsvc" "UI_PORT" "8234"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$PLUGIN_BASE_PATH/testsvc/UI_PORT")" = "8234" ]
+}
+
+@test "set: UI_PORT rejects port below 1024" {
+  create_service_fixture "testsvc"
+  run bash "$PLUGIN_DIR/subcommands/set" "testsvc" "UI_PORT" "80"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid UI_PORT"* ]] || [[ "$output" == *"1024"* ]]
+}
+
 @test "set: unsets a key when value is empty" {
   create_service_fixture "testsvc"
   bash "$PLUGIN_DIR/subcommands/set" "testsvc" "POSTGRES_HOST" "db.example.com"
@@ -411,6 +425,18 @@ load "helpers"
 
   run bash "$PLUGIN_DIR/subcommands/expose" "exposesvc" "7233"
   [ "$status" -eq 0 ]
+  [ ! -f "$PLUGIN_BASE_PATH/exposesvc/UI_HOST_BIND" ]
+}
+
+@test "expose: UI port never appears on server PORT_MAP when UI disabled" {
+  create_service_fixture "exposesvc"
+  # UI_ENABLED unset / false; user still passes 8233 (e.g. old habit) — must not map 8233:8233 on server
+  run bash "$PLUGIN_DIR/subcommands/expose" "exposesvc" "7233" "8233"
+  [ "$status" -eq 0 ]
+  local port_map
+  port_map="$(cat "$PLUGIN_BASE_PATH/exposesvc/PORT_MAP")"
+  [[ "$port_map" == "127.0.0.1:7233:7233" ]]
+  [[ "$port_map" != *"8233"* ]]
   [ ! -f "$PLUGIN_BASE_PATH/exposesvc/UI_HOST_BIND" ]
 }
 

@@ -27,6 +27,7 @@ ALLOWED_KEYS=(
   IMAGE_VERSION
   CONFIG_OPTIONS
   UI_ENABLED
+  UI_PORT
   AUTOSTART
 )
 
@@ -47,6 +48,12 @@ done
 
 if [[ "$VALID_KEY" != "true" ]]; then
   dokku_log_fail "Invalid key '$KEY'. Allowed keys: ${ALLOWED_KEYS[*]}"
+fi
+
+if [[ "$KEY" == "UI_PORT" ]] && [[ -n "$VALUE" ]]; then
+  if ! echo "$VALUE" | grep -qE '^[0-9]+$' || [[ "$VALUE" -lt 1024 ]] || [[ "$VALUE" -gt 65535 ]]; then
+    dokku_log_fail "Invalid UI_PORT '$VALUE'. Use a number between 1024 and 65535."
+  fi
 fi
 
 KEY_FILE="$SERVICE_ROOT/$KEY"
@@ -74,6 +81,8 @@ else
 
   if [[ "$IS_CREDENTIAL" == "true" ]]; then
     chmod 600 "$KEY_FILE"
+  elif [[ "$KEY" == "UI_PORT" ]]; then
+    chmod 640 "$KEY_FILE"
   fi
 
   dokku_log_info1 "Set ${PLUGIN_SERVICE} service $SERVICE property $KEY"
